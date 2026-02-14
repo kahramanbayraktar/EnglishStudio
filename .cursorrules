@@ -1,0 +1,13 @@
+# COMMIT MESSAGES (STRICT)
+
+- **LANGUAGE:** 
+  - **Code Structure:** English (Variables, Classes, Methods).
+  - **Comments:** English. Standard professional documentation language (Applies to BOTH codebase and chat examples).
+  - **Commits:** English.
+  - **Conversations:** Turkish.
+- **FORMAT:**
+  - One-line technical subject (feat/fix/chore prefix).
+  - Concise bullet points.
+  - NO file paths or markdown links.
+- **DELIVERY:** Provide the message inside a triple-backtick code block (text).
+- **GEMINI API MODELS:** Gemini 1.5 models do not exist anymore! Use Gemini 2.5 or 3.0 models instead.
