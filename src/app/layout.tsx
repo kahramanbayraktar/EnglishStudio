@@ -27,7 +27,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         {children}
-        <Script src="https:/kahramanlabs.com/widget.js" strategy="afterInteractive" />
+        <Script src="https://kahramanlabs.com/widget.js" strategy="afterInteractive" />
       </body>
     </html>
   );
