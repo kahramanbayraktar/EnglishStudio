@@ -3,15 +3,56 @@
 import { AnalysisResult, analyzeText } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, Search, Sparkles, X } from 'lucide-react';
-import { useState } from 'react';
+import { BookOpen, Clock, History as HistoryIcon, Search, Sparkles, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import styles from './page.module.css';
+
+interface HistoryEntry {
+  id: string;
+  content: string;
+  created_at: string;
+}
 
 export default function Home() {
   const [text, setText] = useState('');
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [selectedPhrase, setSelectedPhrase] = useState<AnalysisResult | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const fetchHistory = async () => {
+    const { data, error } = await supabase
+      .from('es_source_texts')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) console.error('Error fetching history:', error);
+    else setHistory(data || []);
+  };
+
+  const loadHistoryItem = async (item: HistoryEntry) => {
+    setText(item.content);
+    setIsAnalyzing(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from('es_extracted_phrases')
+        .select('phrase, type, meaning, example')
+        .eq('text_id', item.id);
+
+      if (error) throw error;
+      setResults(data as AnalysisResult[]);
+    } catch (error) {
+      console.error('Error loading history item:', error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   const handleAnalyze = async () => {
     if (!text.trim()) return;
@@ -48,6 +89,8 @@ export default function Home() {
             .insert(itemsToInsert);
 
           if (phrasesError) throw phrasesError;
+          
+          fetchHistory(); // Refresh history
         }
       }
     } catch (error) {
@@ -78,62 +121,88 @@ export default function Home() {
         </motion.div>
       </header>
 
-      <section className={styles.inputSection}>
-        <textarea
-          className={styles.textarea}
-          placeholder="Paste your English text here (e.g., 'I will look after the kids while you go out. Don't worry, it's a piece of cake!')"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <button 
-          className={styles.analyzeBtn}
-          onClick={handleAnalyze}
-          disabled={isAnalyzing}
-        >
-          {isAnalyzing ? (
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+      <div className={styles.layoutContainer}>
+        <div className={styles.mainContent}>
+          <section className={styles.inputSection}>
+            <textarea
+              className={styles.textarea}
+              placeholder="Paste your English text here..."
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+            <button 
+              className={styles.analyzeBtn}
+              onClick={handleAnalyze}
+              disabled={isAnalyzing}
             >
-              <Search size={20} />
-            </motion.div>
-          ) : (
-            'Analyze Text'
+              {isAnalyzing ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                >
+                  <Search size={20} />
+                </motion.div>
+              ) : (
+                'Analyze Text'
+              )}
+            </button>
+          </section>
+
+          {results.length > 0 && (
+            <motion.section 
+              className={styles.resultsSection}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className={styles.resultsHeader}>
+                <h2 className="glow-text" style={{ fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <BookOpen size={24} className="gradient-text" /> 
+                  Identified Phrases
+                </h2>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.4)' }}>
+                  {results.length} items found
+                </div>
+              </div>
+
+              <div className={styles.chipContainer}>
+                {results.map((item, index) => (
+                  <motion.button
+                    key={index}
+                    className={`${styles.chip} ${item.type === 'phrasal_verb' ? styles.phrasalVerbChip : styles.idiomChip}`}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setSelectedPhrase(item)}
+                  >
+                    {item.phrase}
+                  </motion.button>
+                ))}
+              </div>
+            </motion.section>
           )}
-        </button>
-      </section>
+        </div>
 
-      {results.length > 0 && (
-        <motion.section 
-          className={styles.resultsSection}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className={styles.resultsHeader}>
-            <h2 className="glow-text" style={{ fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <BookOpen size={24} className="gradient-text" /> 
-              Identified Phrases
-            </h2>
-            <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.4)' }}>
-              {results.length} items found
-            </div>
-          </div>
-
-          <div className={styles.chipContainer}>
-            {results.map((item, index) => (
-              <motion.button
-                key={index}
-                className={`${styles.chip} ${item.type === 'phrasal_verb' ? styles.phrasalVerbChip : styles.idiomChip}`}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedPhrase(item)}
+        <aside className={`${styles.historySidebar} glass-panel`}>
+          <h3 className={styles.historyTitle}>
+            <HistoryIcon size={20} className="gradient-text" />
+            Recent Analyses
+          </h3>
+          <div className={styles.historyList}>
+            {history.map((item) => (
+              <button 
+                key={item.id} 
+                className={styles.historyItem}
+                onClick={() => loadHistoryItem(item)}
               >
-                {item.phrase}
-              </motion.button>
+                <div className={styles.historyItemContent}>{item.content}</div>
+                <div className={styles.historyItemDate}>
+                  <Clock size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+                  {new Date(item.created_at).toLocaleDateString()}
+                </div>
+              </button>
             ))}
           </div>
-        </motion.section>
-      )}
+        </aside>
+      </div>
 
       <AnimatePresence>
         {selectedPhrase && (
