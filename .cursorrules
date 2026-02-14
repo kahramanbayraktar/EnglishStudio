@@ -10,4 +10,8 @@
   - Concise bullet points.
   - NO file paths or markdown links.
 - **DELIVERY:** Provide the message inside a triple-backtick code block (text).
-- **GEMINI API MODELS:** Gemini 1.5 models do not exist anymore! Use Gemini 2.5 or 3.0 models instead.
+- **GEMINI API MODELS:** Gemini version 1.5 model does not exist anymore! Use Gemini 2.5 or 3.0 models instead. DO NOT CHANGE THE MODEL NAMES WITHOUT PERMISSION SINCE YOU ARE NOT AWARE OF THE CURRENT MODEL NAMES! IT IS NOT YOUR BUSINESS!
+- **PROMPT ABBREVIATIONS:**
+  - KC or AB: Abbreviation for 'Kısaca Cevapla' or 'Answer Briefly'. When you receive this abbreviation, provide a concise and brief response.
+  - MM: Abbreviation for 'Mentor Mode'. When you receive this abbreviation, provide a detailed and comprehensive response. Do NOT write code in this mode.
+  - CM: Abbreviation for 'Coder Mode'. When you receive this abbreviation, write code. Default state is Coder Mode (CM).

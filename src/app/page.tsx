@@ -1,6 +1,7 @@
 'use client';
 
 import { AnalysisResult, analyzeText } from '@/lib/gemini';
+import { supabase } from '@/lib/supabase';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BookOpen, Search, Sparkles, X } from 'lucide-react';
 import { useState } from 'react';
@@ -15,11 +16,42 @@ export default function Home() {
   const handleAnalyze = async () => {
     if (!text.trim()) return;
     setIsAnalyzing(true);
+    
     try {
+      // 1. Analyze using Gemini
       const data = await analyzeText(text);
       setResults(data);
+
+      // 2. Save to Supabase
+      if (data.length > 0) {
+        // Save the main text
+        const { data: textData, error: textError } = await supabase
+          .from('es_source_texts')
+          .insert([{ content: text }])
+          .select()
+          .single();
+
+        if (textError) throw textError;
+
+        if (textData) {
+          // Save the found phrases
+          const itemsToInsert = data.map(item => ({
+            text_id: textData.id,
+            phrase: item.phrase,
+            type: item.type,
+            meaning: item.meaning,
+            example: item.example
+          }));
+
+          const { error: phrasesError } = await supabase
+            .from('es_extracted_phrases')
+            .insert(itemsToInsert);
+
+          if (phrasesError) throw phrasesError;
+        }
+      }
     } catch (error) {
-      console.error(error);
+      console.error('Operation failed:', error);
     } finally {
       setIsAnalyzing(false);
     }
