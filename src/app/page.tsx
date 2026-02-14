@@ -3,7 +3,7 @@
 import { AnalysisResult, analyzeText } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, Clock, History as HistoryIcon, Search, Sparkles, X } from 'lucide-react';
+import { BookOpen, Clock, History as HistoryIcon, Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import styles from './page.module.css';
 
@@ -107,9 +107,31 @@ export default function Home() {
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         >
+          {/* Custom SVG Logo */}
+          <div style={{ marginBottom: '1.5rem', position: 'relative' }}>
+            <div style={{ 
+              position: 'absolute', 
+              inset: '-20px', 
+              background: 'radial-gradient(circle, rgba(99, 102, 241, 0.3) 0%, transparent 70%)', 
+              filter: 'blur(20px)',
+              zIndex: -1
+            }} />
+            <svg width="80" height="80" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20 20 H80 V40 H35 V50 H70 V70 H35 V80 H80" stroke="url(#logoGradient)" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M85 85 L95 95 M5 5 L15 15" stroke="url(#logoGradient)" strokeWidth="4" strokeLinecap="round" opacity="0.5" />
+              <circle cx="85" cy="20" r="5" fill="#ec4899" />
+              <defs>
+                <linearGradient id="logoGradient" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#6366f1" />
+                  <stop offset="100%" stopColor="#ec4899" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+
           <div className="gradient-text" style={{ fontSize: '0.9rem', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '1rem', letterSpacing: '2px' }}>
-            <Sparkles size={14} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
             AI Powered English Learning
           </div>
           <h1 className={styles.title}>
