@@ -1,9 +1,9 @@
 'use client';
 
-import { AnalysisResult, analyzeText } from '@/lib/gemini';
+import { AnalysisResult, SentenceComponent, analyzeText, breakdownSentence } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, Clock, History as HistoryIcon, Search, X } from 'lucide-react';
+import { BookOpen, Clock, History as HistoryIcon, Layers, Save, Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import styles from './page.module.css';
 
@@ -16,9 +16,14 @@ interface HistoryEntry {
 export default function Home() {
   const [text, setText] = useState('');
   const [results, setResults] = useState<AnalysisResult[]>([]);
+  const [breakdownResults, setBreakdownResults] = useState<SentenceComponent[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [activeMode, setActiveMode] = useState<'phrasal' | 'breakdown'>('phrasal');
   const [selectedPhrase, setSelectedPhrase] = useState<AnalysisResult | null>(null);
+  const [selectedSegment, setSelectedSegment] = useState<SentenceComponent | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
 
   useEffect(() => {
     fetchHistory();
@@ -38,60 +43,58 @@ export default function Home() {
   const loadHistoryItem = async (item: HistoryEntry) => {
     setText(item.content);
     setIsAnalyzing(true);
+    setResults([]);
+    setBreakdownResults([]);
     
     try {
       const { data, error } = await supabase
         .from('es_extracted_phrases')
-        .select('phrase, type, meaning, example')
+        .select('*')
         .eq('text_id', item.id);
 
       if (error) throw error;
-      setResults(data as AnalysisResult[]);
+      
+      const items = data as any[];
+      if (items.length > 0) {
+        // Simple heuristic: if any item has type 'phrasal_verb' or 'idiom', it's phrasal mode
+        const isPhrasal = items.some(i => i.type === 'phrasal_verb' || i.type === 'idiom');
+        
+        if (isPhrasal) {
+          setActiveMode('phrasal');
+          setResults(items as AnalysisResult[]);
+        } else {
+          setActiveMode('breakdown');
+          // Map back from DB schema to SentenceComponent
+          setBreakdownResults(items.map(i => ({
+            segment: i.phrase,
+            type: i.type,
+            explanation: i.meaning
+          })));
+        }
+      }
     } catch (error) {
       console.error('Error loading history item:', error);
     } finally {
       setIsAnalyzing(false);
+      setIsSaved(true); // Content loaded from history is by definition saved
     }
   };
+
 
   const handleAnalyze = async () => {
     if (!text.trim()) return;
     setIsAnalyzing(true);
+    setResults([]);
+    setBreakdownResults([]);
+    setIsSaved(false); // New analysis is not saved yet
     
     try {
-      // 1. Analyze using Gemini
-      const data = await analyzeText(text);
-      setResults(data);
-
-      // 2. Save to Supabase
-      if (data.length > 0) {
-        // Save the main text
-        const { data: textData, error: textError } = await supabase
-          .from('es_source_texts')
-          .insert([{ content: text }])
-          .select()
-          .single();
-
-        if (textError) throw textError;
-
-        if (textData) {
-          // Save the found phrases
-          const itemsToInsert = data.map(item => ({
-            text_id: textData.id,
-            phrase: item.phrase,
-            type: item.type,
-            meaning: item.meaning,
-            example: item.example
-          }));
-
-          const { error: phrasesError } = await supabase
-            .from('es_extracted_phrases')
-            .insert(itemsToInsert);
-
-          if (phrasesError) throw phrasesError;
-          
-          fetchHistory(); // Refresh history
-        }
+      if (activeMode === 'phrasal') {
+        const data = await analyzeText(text);
+        setResults(data);
+      } else {
+        const data = await breakdownSentence(text);
+        setBreakdownResults(data);
       }
     } catch (error) {
       console.error('Operation failed:', error);
@@ -99,6 +102,104 @@ export default function Home() {
       setIsAnalyzing(false);
     }
   };
+
+  const handleSave = async () => {
+    if ((activeMode === 'phrasal' && results.length === 0) || 
+        (activeMode === 'breakdown' && breakdownResults.length === 0)) return;
+    
+    if (isSaved) return; // Prevent duplicate saves
+
+    // Check for duplicates: does this text exist in history AND have the same analysis type?
+    const existingEntries = history.filter(h => h.content === text);
+    
+    if (existingEntries.length > 0) {
+      const currentIsPhrasal = activeMode === 'phrasal';
+      let duplicateFound = false;
+
+      // Check all entries with same text content
+      for (const entry of existingEntries) {
+        const { data } = await supabase
+          .from('es_extracted_phrases')
+          .select('type')
+          .eq('text_id', entry.id); // Remove limit(1) to get all types to be sure
+
+        if (data && data.length > 0) {
+          // Check if ANY item in this entry matches the current mode's types
+          const hasPhrasal = data.some(d => d.type === 'phrasal_verb' || d.type === 'idiom');
+          const isEntryPhrasal = hasPhrasal; 
+          // If no items, it's ambiguous, but if items exist we can tell mode.
+          // 'phrasal_verb'/'idiom' -> Phrasal Mode
+          // Other types (Subject, Verb, etc) -> Breakdown Mode
+
+          if (isEntryPhrasal === currentIsPhrasal) {
+            duplicateFound = true;
+            break;
+          }
+        }
+      }
+
+      if (duplicateFound) {
+        setIsSaved(true);
+        return;
+      }
+    }
+
+    setIsSaving(true);
+    try {
+      // 1. Save main text
+      const { data: textData, error: textError } = await supabase
+        .from('es_source_texts')
+        .insert([{ content: text }])
+        .select()
+        .single();
+
+      if (textError) throw textError;
+
+      if (textData) {
+        // 2. Prepare items based on mode
+        let itemsToInsert: any[] = [];
+
+        if (activeMode === 'phrasal') {
+          itemsToInsert = results.map(item => ({
+            text_id: textData.id,
+            phrase: item.phrase,
+            type: item.type,
+            meaning: item.meaning,
+            example: item.example
+          }));
+        } else {
+          // Map SentenceComponent to DB schema
+          // segment -> phrase, explanation -> meaning
+          itemsToInsert = breakdownResults.map(item => ({
+            text_id: textData.id,
+            phrase: item.segment,
+            type: item.type,
+            meaning: item.explanation,
+            example: '' // No example for breakdown
+          }));
+        }
+
+        const { error: phrasesError } = await supabase
+          .from('es_extracted_phrases')
+          .insert(itemsToInsert);
+        
+        if (phrasesError) throw phrasesError;
+        
+        setIsSaved(true); // Mark as saved
+        fetchHistory(); // Refresh
+      }
+    } catch (error) {
+      console.error('Save failed:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const SEGMENT_COLORS = [
+    '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', 
+    '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef', '#f43f5e'
+  ];
+
 
   return (
     <main className={styles.main}>
@@ -138,10 +239,63 @@ export default function Home() {
             English<span className="gradient-text">Studio</span>
           </h1>
           <p className={styles.subtitle}>
-            Paste any English text and instantly discover the phrasal verbs and idioms hidden within.
+            Select a tool and paste your English text to get started.
           </p>
         </motion.div>
       </header>
+
+      {/* Control Bar - New Addition */}
+      <div style={{ maxWidth: '800px', margin: '0 auto 1.5rem', width: '100%', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ 
+          background: 'rgba(255,255,255,0.05)', 
+          padding: '0.5rem', 
+          borderRadius: '16px', 
+          display: 'flex', 
+          gap: '0.5rem',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          <button 
+            onClick={() => setActiveMode('phrasal')}
+            style={{
+              padding: '0.8rem 1.5rem',
+              borderRadius: '12px',
+              background: activeMode === 'phrasal' ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+              color: activeMode === 'phrasal' ? '#818cf8' : 'rgba(255,255,255,0.6)',
+              border: activeMode === 'phrasal' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <BookOpen size={16} />
+            Phrasal & Idioms
+          </button>
+          
+          <button 
+            onClick={() => setActiveMode('breakdown')}
+            style={{
+              padding: '0.8rem 1.5rem',
+              borderRadius: '12px',
+              background: activeMode === 'breakdown' ? 'rgba(236, 72, 153, 0.2)' : 'transparent',
+              color: activeMode === 'breakdown' ? '#f472b6' : 'rgba(255,255,255,0.6)',
+              border: activeMode === 'breakdown' ? '1px solid rgba(236, 72, 153, 0.4)' : '1px solid transparent',
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <Layers size={16} />
+            Sentence Breakdown
+          </button>
+        </div>
+      </div>
 
       <div className={styles.layoutContainer}>
         <div className={styles.mainContent}>
@@ -170,7 +324,7 @@ export default function Home() {
             </button>
           </section>
 
-          {results.length > 0 && (
+          {(results.length > 0 && activeMode === 'phrasal') && (
             <motion.section 
               className={styles.resultsSection}
               initial={{ opacity: 0, y: 20 }}
@@ -181,8 +335,29 @@ export default function Home() {
                   <BookOpen size={24} className="gradient-text" /> 
                   Identified Phrases
                 </h2>
-                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.4)' }}>
-                  {results.length} items found
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.4)', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <span>{results.length} items found</span>
+                  <button 
+                    onClick={handleSave}
+                    disabled={isSaving || isSaved}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.3rem',
+                      background: isSaved ? 'rgba(74, 222, 128, 0.2)' : 'var(--primary-glow)',
+                      border: isSaved ? '1px solid #4ade80' : '1px solid var(--primary)',
+                      padding: '0.3rem 0.8rem',
+                      borderRadius: '8px',
+                      color: isSaved ? '#4ade80' : 'white',
+                      fontSize: '0.8rem',
+                      cursor: (isSaving || isSaved) ? 'default' : 'pointer',
+                      opacity: isSaving ? 0.7 : 1,
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <Save size={14} />
+                    {isSaving ? 'Saving...' : (isSaved ? 'Saved' : 'Save')}
+                  </button>
                 </div>
               </div>
 
@@ -199,6 +374,77 @@ export default function Home() {
                   </motion.button>
                 ))}
               </div>
+            </motion.section>
+          )}
+
+          {(breakdownResults.length > 0 && activeMode === 'breakdown') && (
+            <motion.section 
+              className={styles.resultsSection}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className={styles.resultsHeader}>
+                <h2 className="glow-text" style={{ fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Layers size={24} className="gradient-text" /> 
+                  Sentence Components
+                </h2>
+                <button 
+                  onClick={handleSave}
+                  disabled={isSaving || isSaved}
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '0.3rem',
+                    background: isSaved ? 'rgba(74, 222, 128, 0.2)' : 'var(--secondary-glow)',
+                    border: isSaved ? '1px solid #4ade80' : '1px solid var(--secondary)',
+                    padding: '0.3rem 0.8rem',
+                    borderRadius: '8px',
+                    color: isSaved ? '#4ade80' : 'white',
+                    fontSize: '0.8rem',
+                    cursor: (isSaving || isSaved) ? 'default' : 'pointer',
+                    opacity: isSaving ? 0.7 : 1,
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  <Save size={14} />
+                  {isSaving ? 'Saving...' : (isSaved ? 'Saved' : 'Save')}
+                </button>
+              </div>
+            
+              <div className={styles.breakdownContainer} style={{ 
+                lineHeight: '2.5', 
+                fontSize: '1.3rem', 
+                background: 'rgba(0,0,0,0.2)', 
+                padding: '2rem', 
+                borderRadius: '24px',
+                border: '1px solid rgba(255,255,255,0.05)'
+              }}>
+                {breakdownResults.map((segment, index) => {
+                  const color = SEGMENT_COLORS[index % SEGMENT_COLORS.length];
+                  return (
+                    <motion.span
+                      key={index}
+                      whileHover={{ scale: 1.05, backgroundColor: `${color}40` }} // 40 is hex opacity ~25%
+                      onClick={() => setSelectedSegment(segment)}
+                      style={{
+                        color: color,
+                        cursor: 'pointer',
+                        padding: '0.2rem 0.5rem',
+                        margin: '0 2px',
+                        borderRadius: '6px',
+                        display: 'inline-block', // keeps it inline but allows padding/margin
+                        borderBottom: `2px solid ${color}`,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {segment.segment}
+                    </motion.span>
+                  );
+                })}
+              </div>
+              <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.4)', marginTop: '1rem', fontSize: '0.9rem' }}>
+                Tap on any segment to see its grammatical role explanation.
+              </p>
             </motion.section>
           )}
         </div>
@@ -266,6 +512,48 @@ export default function Home() {
                   <div className={styles.exampleBox}>
                     "{selectedPhrase.example}"
                   </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {selectedSegment && (
+          <motion.div 
+            className={styles.modalOverlay}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSelectedSegment(null)}
+          >
+            <motion.div 
+              className={styles.modal}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button 
+                className={styles.closeBtn} 
+                style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', color: 'rgba(255,255,255,0.4)' }}
+                onClick={() => setSelectedSegment(null)}
+              >
+                <X size={24} />
+              </button>
+
+              <div className={styles.modalContent}>
+                <span className={styles.typeBadge} style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }}>
+                  {selectedSegment.type}
+                </span>
+                <h3 className="gradient-text" style={{ fontSize: '1.5rem', lineHeight: '1.3' }}>
+                  "{selectedSegment.segment}"
+                </h3>
+                 
+                <div style={{ marginTop: '1.5rem' }}>
+                  <div className={styles.meaningLabel}>Explanation</div>
+                  <p className={styles.meaningText}>
+                    {selectedSegment.explanation}
+                  </p>
                 </div>
               </div>
             </motion.div>
