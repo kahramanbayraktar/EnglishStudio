@@ -126,10 +126,11 @@
   align-items: center;
   justify-content: center;
   z-index: 100;
+  padding: 1rem;
 }
 
 .modal {
-  width: 90%;
+  width: 100%;
   max-width: 500px;
   padding: 2.5rem;
   background: #15151a;
@@ -189,6 +190,7 @@
   display: flex;
   flex-direction: column;
   gap: 2rem;
+  width: 100%; /* Ensure it takes full width when flex direction changes */
 }
 
 .historySidebar {
@@ -260,4 +262,70 @@
 
 .closeBtn:hover {
   color: white;
+}
+
+@media (max-width: 900px) {
+  .main {
+    padding: 2rem 1rem;
+  }
+
+  .title {
+    font-size: 3rem;
+  }
+
+  .layoutContainer {
+    flex-direction: column;
+  }
+
+  .historySidebar {
+    width: 100%;
+    max-height: none;
+    position: relative;
+    top: 0;
+    margin-top: 2rem;
+  }
+
+  .inputSection {
+    margin-bottom: 2rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .title {
+    font-size: 2.5rem;
+  }
+  
+  .hero {
+    margin-bottom: 2.5rem;
+  }
+
+  .textarea {
+    min-height: 150px;
+    padding: 1rem;
+    font-size: 1rem;
+  }
+
+  .analyzeBtn {
+    position: relative;
+    bottom: auto;
+    right: auto;
+    width: 100%;
+    margin-top: 1rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .chip {
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .modal {
+    padding: 1.5rem;
+  }
+
+  .modalContent h3 {
+    font-size: 1.5rem;
+  }
 }
